@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { users } from '@/lib/db/schema';
+import { verifyPassword, generateToken } from '@/lib/auth';
+import { eq } from 'drizzle-orm';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { email, password } = body;
+
+    if (!email || !password) {
+      return NextResponse.json(
+        { error: 'Email and password are required' },
+        { status: 400 }
+      );
+    }
+
+    // Find user
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Invalid credentials' },
+        { status: 401 }
+      );
+    }
+
+    // Verify password
+    const isValid = await verifyPassword(password, user.password);
+
+    if (!isValid) {
+      return NextResponse.json(
+        { error: 'Invalid credentials' },
+        { status: 401 }
+      );
+    }
+
+    // Generate token
+    const token = generateToken(user.id, user.email, user.role);
+
+    // Create response
+    const response = NextResponse.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
+      token,
+    });
+
+    // Set cookie
+    response.cookies.set('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    return response;
+  } catch (error) {
+    console.error('Login error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+
+
